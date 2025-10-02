@@ -59,7 +59,7 @@ const AnalysisSection = ({ reports }) => {
   const avgBill = reports.length > 0 ? (totalBill / reports.length).toFixed(2) : 0;
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-6 ">
       <div>
         <h1 className="text-3xl font-bold text-orange-500">Energy Analysis</h1>
         <p className="text-gray-400 mt-2">Statistical insights and visualizations</p>

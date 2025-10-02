@@ -43,8 +43,8 @@ const Sidebar = ({ activeSection, setActiveSection }) => {
       {/* Footer Version Info */}
       <div className="p-6 border-t border-gray-800">
         <div className="bg-gray-900 rounded-lg p-4">
-          <p className="text-sm text-gray-400 mb-1">Version</p>
-          <p className="text-lg font-bold text-orange-500">v1.0.0</p>
+          <p className="text-sm text-gray-400 mb-1">Energy Predictor</p>
+          <p className="text-lg font-bold text-orange-500">Analytics</p>
         </div>
       </div>
     </div>

@@ -40,7 +40,7 @@ function App() {
   };
 
   return (
-    <div className="min-h-screen bg-black text-white">
+    <div className="min-h-screen bg-black text-white" >
       <Sidebar activeSection={activeSection} setActiveSection={setActiveSection} />
 
       <div className="ml-64">
