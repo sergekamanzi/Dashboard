@@ -2,22 +2,28 @@ import { useState } from 'react';
 import Sidebar from './components/Sidebar';
 import Navbar from './components/Navbar';
 import AdminSection from './components/AdminSection';
-import PredictionSection from './components/PredictionSection';
+import PredictionSection, { type Predictions } from './components/PredictionSection';
 import AnalysisSection from './components/AnalysisSection';
 import ReportSection from './components/ReportSection';
 import SettingsSection from './components/SettingsSection';
+import type { Report } from './types';
+
+// Use shared Report type from `src/types.ts`
 
 function App() {
   const [activeSection, setActiveSection] = useState('prediction');
-  const [reports, setReports] = useState([]);
+  const [reports, setReports] = useState<Report[]>([]);
+  const [role, setRole] = useState<'Admin' | 'Household User'>('Household User');
+  const [currentHouseholdId] = useState<string>(() => `hh-${Date.now()}`);
   const [showPaymentModal, setShowPaymentModal] = useState(false);
   const [paymentMethod, setPaymentMethod] = useState('');
 
-  const handleGenerateReport = (reportData) => {
-    const newReport = {
+  const handleGenerateReport = (reportData: Predictions) => {
+    const newReport: Report = {
+      ...reportData,
       id: Date.now(),
       timestamp: new Date().toISOString(),
-      ...reportData
+      ownerId: currentHouseholdId
     };
     setReports([...reports, newReport]);
   };
@@ -25,13 +31,13 @@ function App() {
   const renderSection = () => {
     switch (activeSection) {
       case 'admin':
-        return <AdminSection reports={reports} />;
+  return role === 'Admin' ? <AdminSection reports={reports} /> : <div className="text-center text-black">Access denied.</div>;
       case 'prediction':
-        return <PredictionSection onGenerateReport={handleGenerateReport} />;
+  return role === 'Household User' ? <PredictionSection onGenerateReport={handleGenerateReport} ownerId={currentHouseholdId} /> : <div className="text-center text-black">Prediction accessible to household users only.</div>;
       case 'analysis':
-        return <AnalysisSection reports={reports} />;
+        return <AnalysisSection isAdmin={role === 'Admin'} reports={reports.filter(r => role === 'Admin' ? true : r.ownerId === currentHouseholdId)} />;
       case 'report':
-        return <ReportSection reports={reports} />;
+        return <ReportSection isAdmin={role === 'Admin'} reports={reports.filter(r => role === 'Admin' ? true : r.ownerId === currentHouseholdId)} />;
       case 'settings':
         return <SettingsSection />;
       default:
@@ -40,13 +46,15 @@ function App() {
   };
 
   return (
-    <div className="min-h-screen bg-black text-white" >
-      <Sidebar activeSection={activeSection} setActiveSection={setActiveSection} />
+  <div className="min-h-screen bg-gray-50 text-black" >
+  <Sidebar activeSection={activeSection} setActiveSection={setActiveSection} role={role} />
 
       <div className="ml-64">
         <Navbar
           setShowPaymentModal={setShowPaymentModal}
           setPaymentMethod={setPaymentMethod}
+          selectedRole={role}
+          setSelectedRole={setRole}
         />
 
         <main className="p-8">
@@ -55,15 +63,15 @@ function App() {
       </div>
 
       {showPaymentModal && (
-        <div className="fixed inset-0 bg-black bg-opacity-75 flex items-center justify-center z-50">
-          <div className="bg-gray-900 p-8 rounded-lg max-w-md w-full border-2 border-green-500">
+        <div className="fixed inset-0 bg-gray-900 bg-opacity-30 flex items-center justify-center z-50">
+          <div className="bg-white p-8 rounded-lg max-w-md w-full border-2 border-green-500">
             <div className="flex justify-between items-center mb-6">
               <h2 className="text-2xl font-bold text-orange-500">
                 {paymentMethod === 'momo' ? 'MTN MoMo Payment' : 'PayPal Payment'}
               </h2>
               <button
                 onClick={() => setShowPaymentModal(false)}
-                className="text-white hover:text-red-500"
+                className="text-black hover:text-red-500"
               >
                 ✕
               </button>
@@ -77,7 +85,7 @@ function App() {
                     <input
                       type="tel"
                       placeholder="078XXXXXXX"
-                      className="w-full px-4 py-2 bg-gray-800 border border-green-500 rounded text-white"
+                      className="w-full px-4 py-2 bg-white border border-green-500 rounded text-black"
                     />
                   </div>
                   <div>
@@ -85,7 +93,7 @@ function App() {
                     <input
                       type="number"
                       placeholder="Enter amount"
-                      className="w-full px-4 py-2 bg-gray-800 border border-green-500 rounded text-white"
+                      className="w-full px-4 py-2 bg-white border border-green-500 rounded text-black"
                     />
                   </div>
                 </>
@@ -96,7 +104,7 @@ function App() {
                     <input
                       type="email"
                       placeholder="your@email.com"
-                      className="w-full px-4 py-2 bg-gray-800 border border-green-500 rounded text-white"
+                      className="w-full px-4 py-2 bg-white border border-green-500 rounded text-black"
                     />
                   </div>
                   <div>
@@ -115,7 +123,7 @@ function App() {
                   alert('Payment Successful!');
                   setShowPaymentModal(false);
                 }}
-                className="w-full bg-green-500 hover:bg-green-600 text-black font-bold py-3 rounded transition"
+                className="w-full bg-green-500 hover:bg-green-600 text-white font-bold py-3 rounded transition"
               >
                 Pay Now
               </button>

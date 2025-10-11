@@ -1,249 +1,349 @@
-import { useState, useEffect } from 'react';
-import { Users, AlertCircle, TrendingUp, Zap, Network, Play } from 'lucide-react';
+import { useState } from 'react';
+import { Users, AlertCircle, Zap, Network, Play, BarChart3 } from 'lucide-react';
+import type { Report } from '../types';
 
-const AdminSection = ({ reports = [] }) => {
-  const [clusters, setClusters] = useState([]);
-  const [anomalies, setAnomalies] = useState([]);
-  const [selectedCluster, setSelectedCluster] = useState(null);
+interface Cluster {
+  cluster_id: number;
+  cluster_name: string;
+  description: string;
+  color: string;
+  households: Report[];
+  avg_consumption: number;
+  avg_bill: number;
+  size: number;
+  consumption_range: string;
+  typical_profile: string;
+  min_consumption: number;
+  max_consumption: number;
+  common_regions: string[];
+}
+
+interface Anomaly {
+  report: Report;
+  anomaly_score: number;
+  reasons: string[];
+  consumption_per_person: number;
+  region_comparison?: number;
+}
+
+interface AdminSectionProps {
+  reports?: Report[];
+}
+
+const AdminSection = ({ reports = [] }: AdminSectionProps) => {
+  const [clusters, setClusters] = useState<Cluster[]>([]);
+  const [anomalies, setAnomalies] = useState<Anomaly[]>([]);
+  const [selectedCluster, setSelectedCluster] = useState<Cluster | null>(null);
   const [activeTab, setActiveTab] = useState('kmeans');
-  const [hasRunClustering, setHasRunClustering] = useState(false);
-  const [hasRunAnomalyDetection, setHasRunAnomalyDetection] = useState(false);
+  const [isLoading, setIsLoading] = useState(false);
+  const [modelMetrics, setModelMetrics] = useState<Record<string, unknown>>({});
 
-  const avgConsumption = reports.length > 0 
-    ? (reports.reduce((sum, r) => sum + parseFloat(r.consumption || 0), 0) / reports.length).toFixed(2)
-    : 0;
+  // Calculate basic statistics
+  const avgConsumption = reports.length > 0
+    ? (reports.reduce((sum, r) => sum + (r.total_kwh || 0), 0) / reports.length).toFixed(2)
+    : '0';
 
-  const performClustering = () => {
+  const totalBill = reports.reduce((sum, r) => sum + (r.total_bill || 0), 0);
+
+  const performUnsupervisedAnalysis = async () => {
     if (reports.length < 3) {
+      alert('Need at least 3 reports to perform clustering analysis');
       return;
     }
 
-    const clusterData = [
-      {
-        id: 1,
-        name: 'Low Consumption Cluster',
-        description: 'Households with consumption < 30 kWh',
-        color: 'green',
-        households: reports.filter(r => parseFloat(r.consumption) < 30),
-        avgConsumption: reports
-          .filter(r => parseFloat(r.consumption) < 30)
-          .reduce((sum, r) => sum + parseFloat(r.consumption), 0) /
-          Math.max(reports.filter(r => parseFloat(r.consumption) < 30).length, 1)
-      },
-      {
-        id: 2,
-        name: 'Medium Consumption Cluster',
-        description: 'Households with consumption 30-80 kWh',
-        color: 'orange',
-        households: reports.filter(r => parseFloat(r.consumption) >= 30 && parseFloat(r.consumption) <= 80),
-        avgConsumption: reports
-          .filter(r => parseFloat(r.consumption) >= 30 && parseFloat(r.consumption) <= 80)
-          .reduce((sum, r) => sum + parseFloat(r.consumption), 0) /
-          Math.max(reports.filter(r => parseFloat(r.consumption) >= 30 && parseFloat(r.consumption) <= 80).length, 1)
-      },
-      {
-        id: 3,
-        name: 'High Consumption Cluster',
-        description: 'Households with consumption > 80 kWh',
-        color: 'red',
-        households: reports.filter(r => parseFloat(r.consumption) > 80),
-        avgConsumption: reports
-          .filter(r => parseFloat(r.consumption) > 80)
-          .reduce((sum, r) => sum + parseFloat(r.consumption), 0) /
-          Math.max(reports.filter(r => parseFloat(r.consumption) > 80).length, 1)
-      }
-    ];
+    setIsLoading(true);
+    try {
+      const response = await fetch('http://localhost:8000/api/unsupervised/cluster', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          reports: reports.map(report => ({
+            ...report,
+            household_size: report.household_size || 1,
+            income_level: report.income_level || 'Medium',
+            region: report.region || 'Kigali'
+          }))
+        }),
+      });
 
-    setClusters(clusterData);
-    setHasRunClustering(true);
+      const data = await response.json();
+
+      if (data.status === 'success') {
+        setClusters(data.clusters);
+        setAnomalies(data.anomalies);
+        setModelMetrics(data.model_metrics);
+      } else {
+        alert('Clustering failed: ' + data.message);
+      }
+    } catch (error) {
+      console.error('Clustering error:', error);
+      alert('Failed to perform clustering analysis');
+    } finally {
+      setIsLoading(false);
+    }
   };
 
-  const detectAnomalies = () => {
-    if (reports.length < 3) {
-      return;
+  // Stats cards data
+  const stats = [
+    {
+      label: 'Total Households',
+      value: reports.length,
+      icon: Users,
+      color: 'green'
+    },
+    {
+      label: 'Clusters Identified',
+      value: clusters.length,
+      icon: Network,
+      color: 'orange'
+    },
+    {
+      label: 'High Consumption Anomalies',
+      value: anomalies.length,
+      color: 'red',
+      icon: AlertCircle
+    },
+    {
+      label: 'Avg Consumption',
+      value: `${avgConsumption} kWh`,
+      color: 'blue',
+      icon: Zap
+    },
+    {
+      label: 'Total Monthly Bill',
+      value: `${(totalBill / 1000).toFixed(0)}K RWF`,
+      color: 'purple',
+      icon: BarChart3
+    },
+    {
+      label: 'Anomaly Rate',
+      value: modelMetrics.anomaly_rate || '0%',
+      color: 'yellow',
+      icon: AlertCircle
     }
+  ];
 
-    const consumptions = reports.map(r => parseFloat(r.consumption));
-    const mean = consumptions.reduce((a, b) => a + b, 0) / consumptions.length;
-    const stdDev = Math.sqrt(
-      consumptions.reduce((sum, val) => sum + Math.pow(val - mean, 2), 0) / consumptions.length
-    );
+  const getColorClass = (color: string) => {
+    const colorMap: { [key: string]: string } = {
+      green: 'bg-green-500',
+      orange: 'bg-orange-500', 
+      red: 'bg-red-500',
+      blue: 'bg-blue-500',
+      purple: 'bg-purple-500',
+      yellow: 'bg-yellow-500'
+    };
+  return colorMap[color] || 'bg-black';
+  };
 
-    const threshold = mean + (2 * stdDev);
-    const anomalousReports = reports.filter(r => parseFloat(r.consumption) > threshold);
-    
-    setAnomalies(anomalousReports);
-    setHasRunAnomalyDetection(true);
+  const getTextColorClass = (color: string) => {
+    const colorMap: { [key: string]: string } = {
+      green: 'text-green-500',
+      orange: 'text-orange-500',
+      red: 'text-red-500',
+      blue: 'text-blue-500', 
+      purple: 'text-purple-500',
+      yellow: 'text-yellow-500'
+    };
+  return colorMap[color] || 'text-black';
+  };
+
+  const getClusterDescription = (cluster: Cluster) => {
+    return `${cluster.description} - ${cluster.size} household${cluster.size !== 1 ? 's' : ''}`;
   };
 
   return (
-    <div className="min-h-screen bg-black text-white p-8">
-      <div className="max-w-6xl mx-auto space-y-6">
+    <div className="min-h-screen bg-gray-50 text-black p-8">
+      <div className="max-w-7xl mx-auto space-y-6">
         {/* Header */}
         <div className="mb-8">
           <h1 className="text-4xl font-bold text-orange-500 mb-2">Admin Dashboard</h1>
-          <p className="text-gray-400">Unsupervised machine learning models for household clustering and analysis</p>
+          <p className="text-black">Rule-Based Household Clustering & Anomaly Detection</p>
+          {(() => {
+            const method = modelMetrics.clustering_method ? String(modelMetrics.clustering_method) : undefined;
+            return method ? <p className="text-green-400 text-sm mt-1">Method: {method}</p> : null;
+          })()}
         </div>
 
-        {/* Stats Cards */}
-        <div className="grid grid-cols-1 md:grid-cols-4 gap-6">
-          <div className="bg-gray-900 rounded-2xl p-6 border border-gray-800">
-            <div className="flex items-center justify-between mb-4">
-              <h3 className="text-sm text-gray-400">Total Households</h3>
-              <Users className="text-green-500" size={24} />
+        {/* Stats Grid */}
+        <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-4 mb-8">
+          {stats.map((stat, index) => (
+            <div key={index} className="bg-white rounded-xl p-4 border border-gray-200">
+              <div className="flex items-center justify-between mb-2">
+                <stat.icon className={getTextColorClass(stat.color)} size={20} />
+                <span className="text-xs text-black">{stat.label}</span>
+              </div>
+              <p className={`text-xl font-bold ${getTextColorClass(stat.color)}`}>{String(stat.value)}</p>
             </div>
-            <p className="text-4xl font-bold text-green-500 mb-1">{reports.length}</p>
-            <p className="text-sm text-gray-400">Available for analysis</p>
-          </div>
-
-          <div className="bg-gray-900 rounded-2xl p-6 border border-gray-800">
-            <div className="flex items-center justify-between mb-4">
-              <h3 className="text-sm text-gray-400">Clusters Identified</h3>
-              <Network className="text-orange-500" size={24} />
-            </div>
-            <p className="text-4xl font-bold text-orange-500 mb-1">{hasRunClustering ? clusters.length : 0}</p>
-            <p className="text-sm text-gray-400">K-Means groups</p>
-          </div>
-
-          <div className="bg-gray-900 rounded-2xl p-6 border border-gray-800">
-            <div className="flex items-center justify-between mb-4">
-              <h3 className="text-sm text-gray-400">Anomalies Found</h3>
-              <AlertCircle className="text-red-500" size={24} />
-            </div>
-            <p className="text-4xl font-bold text-red-500 mb-1">{hasRunAnomalyDetection ? anomalies.length : 0}</p>
-            <p className="text-sm text-gray-400">Unusual patterns</p>
-          </div>
-
-          <div className="bg-gray-900 rounded-2xl p-6 border border-gray-800">
-            <div className="flex items-center justify-between mb-4">
-              <h3 className="text-sm text-gray-400">Avg Consumption</h3>
-              <Zap className="text-blue-500" size={24} />
-            </div>
-            <p className="text-4xl font-bold text-blue-500 mb-1">{avgConsumption}</p>
-            <p className="text-sm text-gray-400">kWh across all households</p>
-          </div>
+          ))}
         </div>
 
-        {/* Tab Navigation */}
-        <div className="flex gap-2">
+        {/* Control Section */}
+        <div className="bg-white rounded-2xl p-6 border border-gray-200 mb-6">
+          <div className="flex items-center justify-between">
+            <div>
+              <h2 className="text-2xl font-bold text-green-500 mb-2">Rule-Based Clustering Models</h2>
+              <p className="text-black">
+                Analyze household patterns using rule-based clustering and detect high-consumption anomalies
+              </p>
+              <p className="text-green-400 text-sm mt-1">
+                Clustering based on consumption ranges: Tier 1 (20-99 kWh), Tier 2 (100-250 kWh), Tier 3 (300-600 kWh)
+              </p>
+            </div>
+            <button
+              onClick={performUnsupervisedAnalysis}
+              disabled={isLoading || reports.length < 3}
+              className="bg-green-500 hover:bg-green-600 disabled:bg-gray-300 text-white font-bold px-6 py-3 rounded-lg transition flex items-center gap-2"
+            >
+              <Play size={20} />
+              {isLoading ? 'Analyzing...' : 'Run Analysis'}
+            </button>
+          </div>
+          {reports.length < 3 && (
+            <p className="text-red-400 mt-3">
+              Need at least 3 household reports to perform analysis
+            </p>
+          )}
+        </div>
+
+        {/* Results Tabs */}
+        <div className="flex gap-2 mb-6">
           <button
             onClick={() => setActiveTab('kmeans')}
             className={`px-6 py-3 rounded-lg font-bold transition ${
               activeTab === 'kmeans'
-                ? 'bg-green-500 text-black'
-                : 'bg-gray-800 text-gray-400 hover:bg-gray-700'
+                ? 'bg-green-500 text-white'
+                : 'bg-gray-100 text-black hover:bg-gray-200'
             }`}
           >
-            K-Means Clustering
+            Consumption Clustering
           </button>
           <button
             onClick={() => setActiveTab('isolation')}
             className={`px-6 py-3 rounded-lg font-bold transition ${
               activeTab === 'isolation'
-                ? 'bg-orange-500 text-black'
-                : 'bg-gray-800 text-gray-400 hover:bg-gray-700'
+                ? 'bg-orange-500 text-white'
+                : 'bg-gray-100 text-black hover:bg-gray-200'
             }`}
           >
-            Isolation Forest
+            Anomaly Detection
+          </button>
+          <button
+            onClick={() => setActiveTab('insights')}
+            className={`px-6 py-3 rounded-lg font-bold transition ${
+              activeTab === 'insights'
+                ? 'bg-blue-500 text-white'
+                : 'bg-gray-100 text-black hover:bg-gray-200'
+            }`}
+          >
+            Business Insights
           </button>
         </div>
 
-        {/* K-Means Clustering Tab */}
+        {/* Consumption Clustering Results */}
         {activeTab === 'kmeans' && (
-          <div className="bg-gray-900 rounded-2xl p-8 border border-gray-800">
-            <div className="flex items-start justify-between mb-6">
-              <div>
-                <div className="flex items-center gap-3 mb-2">
-                  <Network className="text-green-500" size={28} />
-                  <h2 className="text-2xl font-bold text-green-500">K-Means Clustering</h2>
-                </div>
-                <p className="text-gray-400">
-                  Group similar households together based on consumption patterns, like sorting fruits into baskets by type
-                </p>
-              </div>
-              <button
-                onClick={performClustering}
-                disabled={reports.length < 3}
-                className="bg-green-500 hover:bg-green-600 cursor-pointer text-black font-bold px-6 py-3 rounded-lg transition flex items-center gap-2"
-              >
-                <Play size={20} />
-                Run Clustering
-              </button>
+          <div className="bg-white rounded-2xl p-6 border border-gray-200">
+            <div className="flex items-center gap-3 mb-6">
+              <Network className="text-green-500" size={28} />
+              <h2 className="text-2xl font-bold text-green-500">Consumption Clustering Results</h2>
             </div>
 
-            {!hasRunClustering ? (
-              <div className="py-20 text-center">
-                <div className="flex justify-center mb-6">
-                  <Network size={80} className="text-gray-700" />
-                </div>
-                <p className="text-gray-400 text-lg mb-4">
-                  Click "Run Clustering" to group households by similarity
+            {clusters.length === 0 ? (
+              <div className="py-12 text-center">
+                <Network size={80} className="mx-auto text-black mb-4" />
+                <p className="text-black text-lg">
+                  {reports.length >= 3 
+                    ? "Click 'Run Analysis' to cluster households by consumption"
+                    : "Need at least 3 reports to perform clustering"
+                  }
                 </p>
-                {reports.length < 3 && (
-                  <p className="text-red-500 font-medium">
-                    Need at least 3 reports to perform clustering
-                  </p>
-                )}
               </div>
             ) : (
               <>
+                <div className="mb-6 p-4 bg-green-50 border border-green-500 rounded-lg">
+                  <p className="text-green-600 font-bold">
+                    ✅ Households successfully clustered into 3 consumption tiers using rule-based approach
+                  </p>
+                </div>
+
                 <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
                   {clusters.map((cluster) => (
                     <div
-                      key={cluster.id}
+                      key={cluster.cluster_id}
                       onClick={() => setSelectedCluster(cluster)}
-                      className={`p-6 rounded-lg cursor-pointer transition border ${
-                        selectedCluster?.id === cluster.id
-                          ? 'border-green-500 bg-gray-800'
-                          : 'border-gray-800 bg-gray-900 hover:bg-gray-800'
-                      } ${
-                        cluster.color === 'green'
-                          ? 'border-l-4 border-l-green-500'
-                          : cluster.color === 'orange'
-                          ? 'border-l-4 border-l-orange-500'
-                          : 'border-l-4 border-l-red-500'
+                      className={`p-6 rounded-lg cursor-pointer transition border-2 ${
+                        selectedCluster?.cluster_id === cluster.cluster_id
+                          ? 'border-green-500 bg-gray-50'
+                          : 'border-gray-200 bg-white hover:bg-gray-50'
                       }`}
                     >
-                      <h3 className="text-lg font-bold mb-2">{cluster.name}</h3>
-                      <p className="text-sm text-gray-400 mb-4">{cluster.description}</p>
-                      <div className="space-y-2">
-                        <div className="flex justify-between text-sm">
-                          <span className="text-gray-400">Households:</span>
-                          <span className="font-bold">{cluster.households.length}</span>
+                      <div className={`w-4 h-4 rounded-full ${getColorClass(cluster.color)} mb-3`}></div>
+                      <h3 className="text-lg font-bold mb-2">{cluster.cluster_name}</h3>
+                      <p className="text-sm text-black mb-4">{getClusterDescription(cluster)}</p>
+                      <div className="space-y-2 text-sm">
+                        <div className="flex justify-between">
+                          <span className="text-black">Households:</span>
+                          <span className="font-bold">{cluster.size}</span>
                         </div>
-                        <div className="flex justify-between text-sm">
-                          <span className="text-gray-400">Avg Consumption:</span>
-                          <span className="font-bold">{cluster.avgConsumption.toFixed(2)} kWh</span>
+                        <div className="flex justify-between">
+                          <span className="text-black">Avg Consumption:</span>
+                          <span className="font-bold">{cluster.avg_consumption} kWh</span>
+                        </div>
+                        <div className="flex justify-between">
+                          <span className="text-black">Avg Bill:</span>
+                          <span className="font-bold">{cluster.avg_bill} RWF</span>
+                        </div>
+                        <div className="flex justify-between">
+                          <span className="text-black">Range:</span>
+                          <span className="font-bold">{cluster.consumption_range}</span>
+                        </div>
+                        <div className="flex justify-between">
+                          <span className="text-black">Actual Range:</span>
+                          <span className="font-bold">{cluster.min_consumption}-{cluster.max_consumption} kWh</span>
                         </div>
                       </div>
                     </div>
                   ))}
                 </div>
 
-                {selectedCluster && selectedCluster.households.length > 0 && (
-                  <div className="mt-6 p-6 bg-gray-800 rounded-lg border border-gray-700">
+                {selectedCluster && (
+                  <div className="mt-6 p-6 bg-gray-50 rounded-lg border border-gray-200">
                     <h3 className="text-xl font-bold text-green-500 mb-4">
-                      {selectedCluster.name} - Details
+                      {selectedCluster.cluster_name} - Detailed View ({selectedCluster.size} households)
                     </h3>
+                    <div className="mb-4 p-3 bg-white rounded-lg">
+                      <p className="text-sm text-black">
+                        <strong>Description:</strong> {selectedCluster.description}
+                      </p>
+                      <p className="text-sm text-black">
+                        <strong>Typical Profile:</strong> {selectedCluster.typical_profile}
+                      </p>
+                      <p className="text-sm text-black">
+                        <strong>Common Regions:</strong> {selectedCluster.common_regions.join(', ')}
+                      </p>
+                    </div>
                     <div className="overflow-x-auto">
                       <table className="w-full">
                         <thead>
                           <tr className="border-b border-gray-700">
-                            <th className="text-left p-3 text-gray-400 font-medium">Timestamp</th>
-                            <th className="text-left p-3 text-gray-400 font-medium">Region</th>
-                            <th className="text-left p-3 text-gray-400 font-medium">Consumption</th>
-                            <th className="text-left p-3 text-gray-400 font-medium">Bill</th>
-                            <th className="text-left p-3 text-gray-400 font-medium">Income Level</th>
+                            <th className="text-left p-3 text-black font-medium">ID</th>
+                              <th className="text-left p-3 text-black font-medium">Region</th>
+                              <th className="text-left p-3 text-black font-medium">Income</th>
+                              <th className="text-left p-3 text-black font-medium">Size</th>
+                              <th className="text-left p-3 text-black font-medium">Consumption</th>
+                              <th className="text-left p-3 text-black font-medium">Bill</th>
                           </tr>
                         </thead>
                         <tbody>
                           {selectedCluster.households.map((household, index) => (
-                            <tr key={index} className="border-b border-gray-800">
-                              <td className="p-3">{new Date(household.timestamp).toLocaleString()}</td>
-                              <td className="p-3">{household.householdData?.region}</td>
-                              <td className="p-3">{household.consumption} kWh</td>
-                              <td className="p-3">{household.bill} RWF</td>
-                              <td className="p-3">{household.householdData?.incomeLevel}</td>
+                            <tr key={index} className="border-b border-gray-800 hover:bg-gray-750">
+                              <td className="p-3 font-mono text-sm">#{household.id}</td>
+                              <td className="p-3">{household.region || 'Unknown'}</td>
+                              <td className="p-3">{household.income_level || 'Unknown'}</td>
+                              <td className="p-3">{household.household_size || 1}</td>
+                              <td className="p-3 font-bold text-green-400">{household.total_kwh} kWh</td>
+                              <td className="p-3 font-bold text-orange-400">{household.total_bill} RWF</td>
                             </tr>
                           ))}
                         </tbody>
@@ -256,96 +356,173 @@ const AdminSection = ({ reports = [] }) => {
           </div>
         )}
 
-        {/* Isolation Forest Tab */}
+        {/* Anomaly Detection Results */}
         {activeTab === 'isolation' && (
-          <div className="bg-gray-900 rounded-2xl p-8 border border-gray-800">
-            <div className="flex items-start justify-between mb-6">
-              <div>
-                <div className="flex items-center gap-3 mb-2">
-                  <AlertCircle className="text-orange-500" size={28} />
-                  <h2 className="text-2xl font-bold text-orange-500">Isolation Forest</h2>
-                </div>
-                <p className="text-gray-400">
-                  Find weird or unusual households, like finding the one rotten apple in the basket
-                </p>
-              </div>
-              <button
-                onClick={detectAnomalies}
-                disabled={reports.length < 3}
-                className="bg-orange-500 hover:bg-orange-600 cursor-pointer text-black font-bold px-6 py-3 rounded-lg transition flex items-center gap-2"
-              >
-                <Play size={20} />
-                Detect Anomalies
-              </button>
+          <div className="bg-white rounded-2xl p-6 border border-gray-200">
+            <div className="flex items-center gap-3 mb-6">
+              <AlertCircle className="text-orange-500" size={28} />
+              <h2 className="text-2xl font-bold text-orange-500">Anomaly Detection Results</h2>
             </div>
 
-            {!hasRunAnomalyDetection ? (
-              <div className="py-20 text-center">
-                <div className="flex justify-center mb-6">
-                  <AlertCircle size={80} className="text-gray-700" />
-                </div>
-                <p className="text-gray-400 text-lg mb-4">
-                  Click "Detect Anomalies" to find unusual household patterns
+            {clusters.length === 0 ? (
+              <div className="py-12 text-center">
+                <AlertCircle size={80} className="mx-auto text-black mb-4" />
+                <p className="text-black text-lg">
+                  Run clustering analysis first to detect anomalies
                 </p>
-                {reports.length < 3 && (
-                  <p className="text-red-500 font-medium">
-                    Need at least 3 reports to detect anomalies
-                  </p>
-                )}
+              </div>
+            ) : anomalies.length === 0 ? (
+              <div className="p-6 bg-green-50 border border-green-500 rounded-lg">
+                <p className="text-green-600 font-bold text-center text-lg">
+                  ✅ No high-consumption anomalies detected. All households under 600 kWh/month.
+                </p>
+                <p className="text-black text-sm text-center mt-2">
+                  Anomaly detection threshold: 600 kWh/month
+                </p>
               </div>
             ) : (
-              <>
-                {anomalies.length > 0 ? (
-                  <div className="space-y-4">
-                    {anomalies.map((anomaly, index) => (
-                      <div
-                        key={index}
-                        className="p-6 bg-red-900 bg-opacity-20 border border-red-500 rounded-lg"
-                      >
-                        <div className="flex items-start justify-between">
-                          <div className="flex-1">
-                            <h3 className="text-xl font-bold text-red-400 mb-4">
-                              Anomaly Detected - Unusual Consumption Pattern
-                            </h3>
-                            <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-4">
-                              <div>
-                                <span className="text-gray-400 text-sm">Consumption:</span>
-                                <p className="font-bold text-red-400 text-lg">{anomaly.consumption} kWh</p>
-                              </div>
-                              <div>
-                                <span className="text-gray-400 text-sm">Bill:</span>
-                                <p className="font-bold text-red-400 text-lg">{anomaly.bill} RWF</p>
-                              </div>
-                              <div>
-                                <span className="text-gray-400 text-sm">Region:</span>
-                                <p className="font-bold text-lg">{anomaly.householdData?.region}</p>
-                              </div>
-                              <div>
-                                <span className="text-gray-400 text-sm">Income:</span>
-                                <p className="font-bold text-lg">{anomaly.householdData?.incomeLevel}</p>
-                              </div>
-                            </div>
-                            <div className="p-4 bg-red-950 bg-opacity-50 rounded-lg border border-red-800">
-                              <p className="text-sm text-red-300">
-                                <strong>Alert:</strong> This household shows significantly higher consumption
-                                than the average. Recommend immediate review and energy audit.
-                              </p>
-                            </div>
+              <div className="space-y-4">
+                <div className="p-4 bg-red-50 border border-red-500 rounded-lg mb-4">
+                  <p className="text-red-600 font-bold">
+                    🚨 Found {anomalies.length} high-consumption household(s) exceeding 600 kWh/month
+                  </p>
+                  <p className="text-red-500 text-sm mt-1">
+                    These households require immediate attention and energy audit
+                  </p>
+                </div>
+                
+                {anomalies.map((anomaly, index) => (
+                  <div key={index} className="p-6 bg-white border border-red-200 rounded-lg">
+                    <div className="flex items-start justify-between">
+                      <div className="flex-1">
+                        <h3 className="text-xl font-bold text-red-400 mb-4">
+                          High Consumption Anomaly #{index + 1}
+                        </h3>
+                        <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-4">
+                          <div>
+                            <span className="text-black text-sm">Household ID:</span>
+                            <p className="font-bold text-black font-mono">#{anomaly.report.id}</p>
                           </div>
-                          <AlertCircle size={40} className="text-red-500 ml-4 flex-shrink-0" />
+                          <div>
+                            <span className="text-black text-sm">Consumption:</span>
+                            <p className="font-bold text-red-600 text-lg">{anomaly.report.total_kwh} kWh</p>
+                          </div>
+                          <div>
+                            <span className="text-black text-sm">Bill:</span>
+                            <p className="font-bold text-red-600 text-lg">{anomaly.report.total_bill} RWF</p>
+                          </div>
+                          <div>
+                            <span className="text-black text-sm">Anomaly Score:</span>
+                            <p className="font-bold text-yellow-500">{anomaly.anomaly_score}</p>
+                          </div>
+                        </div>
+                          <div className="grid grid-cols-2 md:grid-cols-3 gap-4 mb-4 text-sm">
+                          <div>
+                            <span className="text-black">Region:</span>
+                            <p className="font-bold text-black">{anomaly.report.region || 'Unknown'}</p>
+                          </div>
+                          <div>
+                            <span className="text-black">Income Level:</span>
+                            <p className="font-bold text-black">{anomaly.report.income_level || 'Unknown'}</p>
+                          </div>
+                          <div>
+                            <span className="text-black">Household Size:</span>
+                            <p className="font-bold text-black">{anomaly.report.household_size || 1} person(s)</p>
+                          </div>
+                        </div>
+                        <div className="p-4 bg-red-50 rounded-lg border border-red-200">
+                          <h4 className="text-red-600 font-bold mb-2">Detection Reasons:</h4>
+                          <ul className="list-disc list-inside space-y-1">
+                            {anomaly.reasons.map((reason, i) => (
+                              <li key={i} className="text-sm text-red-600">{reason}</li>
+                            ))}
+                          </ul>
                         </div>
                       </div>
-                    ))}
+                      <AlertCircle size={40} className="text-red-500 ml-4 flex-shrink-0" />
+                    </div>
                   </div>
-                ) : (
-                  <div className="p-6 bg-green-900 bg-opacity-20 border border-green-500 rounded-lg">
-                    <p className="text-green-400 font-bold text-center">
-                      No anomalies detected. All households show normal consumption patterns.
-                    </p>
+                ))}
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* Business Insights */}
+        {activeTab === 'insights' && clusters.length > 0 && (
+          <div className="bg-gray-900 rounded-2xl p-6 border border-gray-800">
+            <div className="flex items-center gap-3 mb-6">
+              <BarChart3 className="text-blue-500" size={28} />
+              <h2 className="text-2xl font-bold text-blue-500">Business Insights & Recommendations</h2>
+            </div>
+
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+              <div className="p-6 bg-blue-900 bg-opacity-20 border border-blue-500 rounded-lg">
+                <h3 className="text-lg font-bold text-blue-400 mb-3">📊 Consumption Patterns</h3>
+                <ul className="space-y-2 text-sm text-black">
+                  <li>• Tier 1 (Small Families): {clusters[0]?.size} households ({((clusters[0]?.size / reports.length) * 100).toFixed(1)}%)</li>
+                  <li>• Tier 2 (Average Families): {clusters[1]?.size} households ({((clusters[1]?.size / reports.length) * 100).toFixed(1)}%)</li>
+                  <li>• Tier 3 (Large Families): {clusters[2]?.size} households ({((clusters[2]?.size / reports.length) * 100).toFixed(1)}%)</li>
+                  {anomalies.length > 0 && (
+                    <li className="text-red-400">• High Consumption: {anomalies.length} households ({((anomalies.length / reports.length) * 100).toFixed(1)}%)</li>
+                  )}
+                </ul>
+              </div>
+
+              <div className="p-6 bg-green-900 bg-opacity-20 border border-green-500 rounded-lg">
+                <h3 className="text-lg font-bold text-green-400 mb-3">💡 Actionable Insights</h3>
+                <ul className="space-y-2 text-sm text-black">
+                  <li>• {anomalies.length} households exceed 600 kWh/month and need energy audit</li>
+                  <li>• Target energy efficiency programs for Tier 3 households</li>
+                  <li>• Tier 1 households can be used as efficiency benchmarks</li>
+                  <li>• Consider time-of-use pricing for high consumption clusters</li>
+                </ul>
+              </div>
+            </div>
+
+            {/* Cluster Distribution */}
+            <div className="mt-6 p-6 bg-purple-900 bg-opacity-20 border border-purple-500 rounded-lg">
+              <h3 className="text-lg font-bold text-purple-400 mb-3">🏠 Household Distribution by Consumption Tier</h3>
+              <div className="space-y-4">
+                {clusters.map((cluster) => (
+                  <div key={cluster.cluster_id} className="flex items-center justify-between">
+                    <div className="flex items-center gap-3">
+                      <div className={`w-3 h-3 rounded-full ${getColorClass(cluster.color)}`}></div>
+                      <span className="text-white">{cluster.cluster_name}</span>
+                          <span className="text-black text-sm">({cluster.consumption_range})</span>
+                    </div>
+                    <div className="flex items-center gap-4">
+                      <span className="text-black text-sm">{cluster.size} households</span>
+                      <div className="w-32 bg-gray-700 rounded-full h-3">
+                        <div 
+                          className={`h-3 rounded-full ${getColorClass(cluster.color)}`}
+                          style={{ width: `${(cluster.size / reports.length) * 100}%` }}
+                        ></div>
+                      </div>
+                      <span className="text-white text-sm font-bold">{((cluster.size / reports.length) * 100).toFixed(1)}%</span>
+                    </div>
+                  </div>
+                ))}
+                {anomalies.length > 0 && (
+                    <div className="flex items-center justify-between pt-2 border-t border-gray-700">
+                    <div className="flex items-center gap-3">
+                      <div className="w-3 h-3 rounded-full bg-red-500"></div>
+                      <span className="text-red-400">High Consumption Anomalies</span>
+                    </div>
+                    <div className="flex items-center gap-4">
+                      <span className="text-black text-sm">{anomalies.length} households</span>
+                      <div className="w-32 bg-gray-700 rounded-full h-3">
+                        <div 
+                          className="h-3 rounded-full bg-red-500"
+                          style={{ width: `${(anomalies.length / reports.length) * 100}%` }}
+                        ></div>
+                      </div>
+                      <span className="text-red-400 text-sm font-bold">{((anomalies.length / reports.length) * 100).toFixed(1)}%</span>
+                    </div>
                   </div>
                 )}
-              </>
-            )}
+              </div>
+            </div>
           </div>
         )}
       </div>
